@@ -131,24 +131,37 @@
 
     <script>
         let cartIdCounter = 0;
-        let globalReceiptData = {}; // 복사 기능을 위한 데이터 저장소
+        let globalReceiptData = {};
 
         // 페이지 로드 시 기본 카트 하나 생성
         document.addEventListener('DOMContentLoaded', () => {
             addCart();
         });
 
+        // ★ 순서 재정렬 함수 (핵심 수정 사항) ★
+        function updateCartNumbers() {
+            const carts = document.querySelectorAll('.cart-box');
+            carts.forEach((cart, index) => {
+                const numberBadge = cart.querySelector('.cart-number-badge');
+                if (numberBadge) {
+                    numberBadge.innerText = index + 1; // 화면상 순서대로 1, 2, 3... 부여
+                }
+            });
+        }
+
         // --- 1. UI 생성 함수들 ---
         function addCart(data = null) {
             cartIdCounter++;
-            const currentId = cartIdCounter;
+            const currentId = cartIdCounter; // 이건 내부 ID로만 사용
             const container = document.getElementById('cartsContainer');
             
             const cartHTML = `
                 <div class="cart-box bg-white p-6 rounded-[2rem] card-shadow relative group transition-all" id="cart-${currentId}">
                     <div class="flex justify-between items-center mb-6">
                         <div class="flex-grow flex items-center gap-3">
-                            <div class="bg-yellow-100 text-yellow-600 w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm border border-yellow-200 shadow-sm">${currentId}</div>
+                            <div class="cart-number-badge bg-yellow-100 text-yellow-600 w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm border border-yellow-200 shadow-sm">
+                                1
+                            </div>
                             <input type="text" placeholder="예: 마켓 신상 공구" class="cart-title text-xl font-bold text-gray-700 bg-transparent border-b-2 border-transparent hover:border-gray-200 focus:border-pink-300 focus:outline-none transition w-full placeholder-gray-300" value="${data ? data.title : ''}" oninput="calculateAll()">
                         </div>
                         <button onclick="removeCart(${currentId})" class="text-gray-300 hover:text-red-400 bg-gray-50 hover:bg-red-50 w-8 h-8 rounded-full transition flex items-center justify-center"><i class="fa-solid fa-trash-can"></i></button>
@@ -187,6 +200,8 @@
             } else {
                 addItem(currentId);
             }
+            
+            updateCartNumbers(); // 카트 추가될 때마다 번호 갱신
             calculateAll();
         }
 
@@ -213,9 +228,8 @@
             itemsContainer.insertAdjacentHTML('beforeend', itemHTML);
         }
 
-        // --- 2. 핵심 계산 로직 (스마트 분배 + 오류 방지) ---
+        // --- 2. 핵심 계산 로직 ---
         function calculateAll() {
-            // 환율 오류 방지
             const rateStr = document.getElementById('exchangeRate').value;
             const rate = (rateStr === '' ? 0 : parseFloat(rateStr)) / 100;
             
@@ -224,7 +238,7 @@
             
             document.querySelectorAll('.cart-box').forEach(cart => {
                 const cartId = cart.id.split('-')[1];
-                const cartTitle = cart.querySelector('.cart-title').value || `카트 ${cartId}`;
+                const cartTitle = cart.querySelector('.cart-title').value || `카트 ${cart.querySelector('.cart-number-badge').innerText}`;
                 const shipStr = cart.querySelector('.shipping-cost').value;
                 const shippingJPY = shipStr === '' ? 0 : parseFloat(shipStr);
                 
@@ -235,16 +249,13 @@
                     const iName = row.querySelector('.item-name').value.trim() || '품목 미입력';
                     const rawBuyers = row.querySelector('.item-buyers').value;
                     
-                    // 수량/가격 빈값 처리 (NaN 방지)
                     const qtyStr = row.querySelector('.item-qty').value;
                     const totalRowQty = qtyStr === '' ? 1 : parseFloat(qtyStr);
                     
                     const priceStr = row.querySelector('.item-price').value;
                     const unitPriceJPY = priceStr === '' ? 0 : parseFloat(priceStr);
                     
-                    // --- 구매자 파싱 (이름 + 수량) ---
                     let buyerList = [];
-                    // 콤마, 슬래시 등으로 분리
                     let rawList = rawBuyers.split(/[,/]+/).filter(b => b.trim() !== '');
 
                     if (rawList.length === 0) {
@@ -252,31 +263,25 @@
                     } else {
                         rawList.forEach(raw => {
                             let trimmed = raw.trim();
-                            // 정규식: 이름 뒤에 붙은 숫자 추출 (예: "하치와레 2")
                             let match = trimmed.match(/^(.+?)\s*(\d+)$/);
                             if (match) {
                                 buyerList.push({ name: match[1].trim(), q: parseInt(match[2]) });
                             } else {
-                                // 숫자가 없으면 기본 1개로 간주
                                 buyerList.push({ name: trimmed, q: 1 });
                             }
                         });
                     }
 
-                    // --- 비용 분배 ---
                     const rowTotalPriceJPY = unitPriceJPY * totalRowQty;
                     cartItemsTotalJPY += rowTotalPriceJPY;
 
-                    // 이 줄(Item)의 총 지분 계산
                     let totalShares = 0;
                     buyerList.forEach(b => {
                         totalShares += b.q;
                         cartUsers.add(b.name);
                     });
 
-                    // 개인별 비용 할당
                     buyerList.forEach(b => {
-                        // 지분이 0이면(혹시 모를 오류) 1로 처리
                         const shares = totalShares > 0 ? totalShares : 1;
                         let myShareRatio = b.q / shares;
                         let myCostJPY = rowTotalPriceJPY * myShareRatio;
@@ -287,14 +292,13 @@
                         personReceipts[b.name].items.push({
                             cart: cartTitle,
                             name: iName,
-                            desc: `${b.q}개`, // 영수증에는 "2개" 처럼 본인 몫만 깔끔하게 표시
+                            desc: `${b.q}개`, 
                             cost: myCostKRW
                         });
                         personReceipts[b.name].total += myCostKRW;
                     });
                 });
 
-                // --- 배송비 계산 ---
                 const realUsers = [...cartUsers].filter(u => u !== '미지정');
                 const userCount = realUsers.length > 0 ? realUsers.length : 1;
                 
@@ -319,7 +323,6 @@
             document.getElementById('grandTotalDisplay').innerText = Math.round(grandTotalKRW).toLocaleString();
         }
 
-        // --- 3. 영수증 렌더링 ---
         function renderReceipts(data) {
             const container = document.getElementById('receipt-area');
             container.innerHTML = '';
@@ -371,24 +374,25 @@
             }
         }
         
-        // 카드 색상 랜덤 생성
         function getColor(name) {
             const colors = ['pink-300', 'blue-300', 'yellow-300', 'green-300', 'purple-300'];
             return colors[name.length % colors.length];
         }
 
-        // --- 4. 유틸리티 (삭제, 복사, 저장, 로드) ---
+        // --- 4. 유틸리티 ---
         function removeCart(id) {
             if(confirm('이 카트를 정말 삭제할까요?')) {
                 const cart = document.getElementById(`cart-${id}`);
-                // 애니메이션
                 cart.style.transform = 'scale(0.9)'; 
                 cart.style.opacity = '0';
                 
                 setTimeout(() => {
                     cart.remove();
-                    // 카트가 다 지워지면 기본 카트 하나 생성
+                    // 다 지웠으면 기본 카트 하나 생성
                     if(document.querySelectorAll('.cart-box').length === 0) addCart();
+                    
+                    // ★ 삭제 후 번호 다시 매기기 ★
+                    updateCartNumbers();
                     calculateAll();
                 }, 200);
             }
@@ -449,12 +453,16 @@
             reader.onload = e => {
                 try {
                     const data = JSON.parse(e.target.result);
-                    // ★ 수정된 부분: 카트 번호 초기화 ★
-                    cartIdCounter = 0; 
+                    cartIdCounter = 0; // 초기화
                     
                     document.getElementById('exchangeRate').value = data.rate || 900;
                     document.getElementById('cartsContainer').innerHTML = '';
+                    
+                    // 데이터 로드
                     data.carts.forEach(c => addCart(c));
+                    
+                    // 로드 후에도 번호 정렬
+                    updateCartNumbers();
                     calculateAll();
                     alert("성공적으로 불러왔습니다! 📂");
                 } catch(err) {
